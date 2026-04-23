@@ -81,6 +81,19 @@ function run(cmd, args, opts = {}) {
   });
 }
 
+// Strip Snap-confinement env vars before spawning — these can pollute
+// library paths (e.g. /snap/core20/...) and break GNOME tools that expect
+// the system libc. Only used for screenshot tools where we've seen the
+// issue in the wild; the rest of the server uses default env.
+function cleanEnv() {
+  const e = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith('SNAP_') || k === 'SNAP' || k === 'GTK_PATH' || k === 'GIO_MODULE_DIR' || k === 'LD_LIBRARY_PATH' || k === 'LD_PRELOAD') continue;
+    e[k] = v;
+  }
+  return e;
+}
+
 function buttonCode(name, isScroll = false) {
   if (isScroll) {
     return { up: '4', down: '5', left: '6', right: '7' }[name] || null;
@@ -89,31 +102,57 @@ function buttonCode(name, isScroll = false) {
 }
 
 // ─── Tool: screenshot ─────────────────────────────────────────────────────
+// Preference: maim > scrot > gnome-screenshot.  maim and scrot are small,
+// focused, reliable CLI tools with no dbus dependency. gnome-screenshot
+// can fail in layered-sandbox environments (Snap/Flatpak env pollution)
+// or when the GNOME Shell session bus isn't reachable. If the chosen tool
+// fails at runtime, we fall through to the next one.
 async function screenshot(args) {
   if (!haveScreenshotTool()) {
-    return errorResult('No screenshot tool found. Install one: sudo apt install gnome-screenshot (or scrot / maim).');
+    return errorResult('No screenshot tool found. Install one: sudo apt install maim (preferred), or scrot, or gnome-screenshot.');
   }
   fs.mkdirSync(SHOTS_ROOT, { recursive: true });
   const out = args.path || path.join(SHOTS_ROOT, `shot-${Date.now()}.png`);
   const active = args.active_window === true;
+  const env = cleanEnv();
 
-  let r;
-  if (BIN.gnomeShot) {
-    r = await run(BIN.gnomeShot, active ? ['-w', '-f', out] : ['-f', out]);
-  } else if (BIN.maim) {
-    r = await run(BIN.maim, active ? ['-i', '$(xdotool getactivewindow)', out] : [out]);
-  } else {
-    r = await run(BIN.scrot, active ? ['-u', out] : [out]);
+  // Try each installed tool in order; fall through on runtime failure.
+  const attempts = [];
+
+  async function tryMaim() {
+    if (!BIN.maim) return null;
+    const args2 = active && BIN.xdotool
+      ? ['-i', (await run(BIN.xdotool, ['getactivewindow'], { env })).stdout.trim(), out]
+      : [out];
+    return { tool: 'maim', ...(await run(BIN.maim, args2, { env })) };
   }
-  if (r.code !== 0) return errorResult(`screenshot failed: ${r.stderr || r.stdout || 'unknown'}`);
-  const size = fs.existsSync(out) ? fs.statSync(out).size : 0;
-  if (size === 0) {
-    return errorResult(
-      `screenshot produced no image. Likely cause: no X11 display available (DISPLAY=${process.env.DISPLAY || 'unset'}). ` +
-      `Ensure you are logged into an X11 session (not Wayland; check with: echo $XDG_SESSION_TYPE).`
-    );
+  async function tryScrot() {
+    if (!BIN.scrot) return null;
+    return { tool: 'scrot', ...(await run(BIN.scrot, active ? ['-u', out] : [out], { env })) };
   }
-  return textResult({ path: out, size_bytes: size, active_window: active });
+  async function tryGnome() {
+    if (!BIN.gnomeShot) return null;
+    return { tool: 'gnome-screenshot', ...(await run(BIN.gnomeShot, active ? ['-w', '-f', out] : ['-f', out], { env })) };
+  }
+
+  for (const attempt of [tryMaim, tryScrot, tryGnome]) {
+    // Clear any stale file before each attempt so size=0 check is meaningful.
+    try { if (fs.existsSync(out)) fs.unlinkSync(out); } catch (_) {}
+    const r = await attempt();
+    if (!r) continue;
+    const size = fs.existsSync(out) ? fs.statSync(out).size : 0;
+    attempts.push({ tool: r.tool, code: r.code, size, stderr: (r.stderr || '').slice(0, 200) });
+    if (r.code === 0 && size > 0) {
+      return textResult({ path: out, size_bytes: size, active_window: active, tool: r.tool });
+    }
+  }
+
+  return errorResult(
+    `screenshot failed. Tried: ${attempts.map(a => `${a.tool}(code=${a.code}, size=${a.size})`).join('; ') || '<none installed>'}. ` +
+    `DISPLAY=${process.env.DISPLAY || 'unset'}, XDG_SESSION_TYPE=${process.env.XDG_SESSION_TYPE || 'unset'}. ` +
+    `If XDG_SESSION_TYPE is "wayland", log out and pick an X11 session; this extension does not support Wayland in v0.1. ` +
+    `If you only have gnome-screenshot installed and it's failing, try: sudo apt install maim`
+  );
 }
 
 // ─── Tool: list_windows ───────────────────────────────────────────────────
@@ -474,7 +513,7 @@ async function handle(msg) {
     respond(id, {
       protocolVersion: '2024-11-05',
       capabilities: { tools: {} },
-      serverInfo: { name: 'linux-desktop-mcp', version: '0.1.0' },
+      serverInfo: { name: 'linux-desktop-mcp', version: '0.1.1' },
     });
     return;
   }
