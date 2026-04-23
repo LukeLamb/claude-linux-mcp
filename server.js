@@ -305,13 +305,27 @@ async function clipboardGet() {
 }
 
 // ─── Tool: clipboard_set ──────────────────────────────────────────────────
-async function clipboardSet(args) {
+// Special-cased because `xclip -i` refuses to fork into its background
+// selection-owner daemon when stdout is piped to the parent — it stays
+// foreground and the selection evaporates as soon as xclip exits. We
+// spawn detached with stdout/stderr set to 'ignore' so xclip forks
+// cleanly, hand it the text on stdin, and resolve after a short window.
+function clipboardSet(args) {
   const missing = requireBin('xclip');
-  if (missing) return errorResult(missing);
-  if (typeof args.text !== 'string') return errorResult('text is required (string)');
-  const r = await run(BIN.xclip, ['-selection', 'clipboard', '-i'], { stdin: args.text });
-  if (r.code !== 0) return errorResult(`clipboard_set failed: ${r.stderr || r.stdout}`);
-  return textResult({ length: args.text.length });
+  if (missing) return Promise.resolve(errorResult(missing));
+  if (typeof args.text !== 'string') return Promise.resolve(errorResult('text is required (string)'));
+
+  return new Promise((resolve) => {
+    const child = spawn(BIN.xclip, ['-selection', 'clipboard', '-i'], {
+      detached: true,
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
+    child.on('error', (e) => resolve(errorResult(`clipboard_set failed: ${e.message}`)));
+    child.unref();
+    try { child.stdin.end(args.text); } catch (_) {}
+    // xclip forks once it has stdin; give it ~150ms to become the selection owner.
+    setTimeout(() => resolve(textResult({ length: args.text.length })), 150);
+  });
 }
 
 // ─── Tool: launch_app ─────────────────────────────────────────────────────
@@ -513,7 +527,7 @@ async function handle(msg) {
     respond(id, {
       protocolVersion: '2024-11-05',
       capabilities: { tools: {} },
-      serverInfo: { name: 'linux-desktop-mcp', version: '0.1.2' },
+      serverInfo: { name: 'linux-desktop-mcp', version: '0.1.3' },
     });
     return;
   }
