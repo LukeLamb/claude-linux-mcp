@@ -513,7 +513,7 @@ async function handle(msg) {
     respond(id, {
       protocolVersion: '2024-11-05',
       capabilities: { tools: {} },
-      serverInfo: { name: 'linux-desktop-mcp', version: '0.1.1' },
+      serverInfo: { name: 'linux-desktop-mcp', version: '0.1.2' },
     });
     return;
   }
