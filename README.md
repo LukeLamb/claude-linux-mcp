@@ -72,6 +72,15 @@ sudo apt install scrot               # Minimal CLI
 sudo apt install maim                # Modern replacement for scrot
 ```
 
+**OCR (optional, for `screenshot_text` — added in v0.2):**
+
+```bash
+sudo apt install tesseract-ocr tesseract-ocr-eng
+# Add tesseract-ocr-<lang> for other languages (fra, deu, nld, …).
+```
+
+If tesseract isn't installed, only `screenshot_text` is unavailable — the other 14 tools work normally.
+
 **Claude Desktop:** ≥ 0.10.0 on Linux (bundles a recent Node; no system Node required).
 
 ---

@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "Linux Desktop",
   "display_name": "Linux Desktop",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Give Claude full desktop control on Linux/X11 \u2014 screenshot, mouse, keyboard, windows, clipboard, app launch.",
   "long_description": "This extension lets Claude interact with your Linux desktop the way Windows-MCP does on Windows: take screenshots, move and click the mouse, type and send keystrokes, list/focus/move windows, read and write the clipboard, and launch applications. It shells out to standard X11 tools \u2014 xdotool, wmctrl, xclip, gnome-screenshot \u2014 which means it is lightweight (zero npm dependencies) but requires those packages to be installed system-wide (`sudo apt install xdotool wmctrl xclip`; gnome-screenshot ships with Ubuntu GNOME).\n\n**Supported:** X11 sessions on Ubuntu/Debian/etc. with GNOME, KDE, XFCE, or any standard X11 window manager.\n\n**Not supported in v0.1:** Wayland sessions (input injection is intentionally blocked by the Wayland security model), AT-SPI UI-tree inspection (deferred to a future version).\n\n**Security:** Installing this extension gives Claude full control over your desktop \u2014 it can move your mouse, click buttons, type into focused windows (including password fields), read/write your clipboard, and launch applications. The scope is deliberately broad; treat it like giving someone physical access to your keyboard and mouse. Do not install on machines where Claude should not have unrestricted desktop control.",
   "author": {
@@ -86,6 +86,10 @@
     {
       "name": "launch_app",
       "description": "Launch an application via a shell command or .desktop entry id. Detached from this server."
+    },
+    {
+      "name": "screenshot_text",
+      "description": "Take a screenshot and OCR it with tesseract. Returns the recognized text plus the path to the underlying PNG. Use when Claude needs to READ what is on screen rather than just see it. Requires tesseract-ocr installed."
     }
   ],
   "keywords": [

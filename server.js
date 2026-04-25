@@ -24,6 +24,7 @@ const BIN = {
   gnomeShot: which('gnome-screenshot'),
   scrot: which('scrot'),
   maim: which('maim'),
+  tesseract: which('tesseract'),
 };
 
 function haveScreenshotTool() {
@@ -345,6 +346,40 @@ function launchApp(args) {
   }
 }
 
+// ─── Tool: screenshot_text ────────────────────────────────────────────────
+// Take a screenshot, then OCR it with tesseract. Returns the recognized
+// text plus the path to the underlying PNG. Useful when Claude needs to
+// READ what's on screen (log windows, error dialogs, terminal output in
+// non-focused windows) rather than just see the image.
+async function screenshotText(args) {
+  if (!BIN.tesseract) {
+    return errorResult('tesseract is not installed. Install with: sudo apt install tesseract-ocr tesseract-ocr-eng (add tesseract-ocr-<lang> for other languages).');
+  }
+  // Reuse the screenshot tool to capture (and inherit its fallback chain).
+  const shot = await screenshot({ active_window: args.active_window === true, path: args.path });
+  if (shot.isError) return shot;
+  // screenshot returns { content: [{ type: 'text', text: JSON.stringify({path, ...}) }] }
+  const meta = JSON.parse(shot.content[0].text);
+  const lang = (typeof args.lang === 'string' && args.lang.trim()) ? args.lang.trim() : 'eng';
+  // tesseract <input> stdout -l <lang> writes plain text to stdout.
+  const r = await run(BIN.tesseract, [meta.path, 'stdout', '-l', lang], {
+    env: cleanEnv(),
+  });
+  if (r.code !== 0) {
+    return errorResult(`tesseract failed (code ${r.code}): ${r.stderr || r.stdout || 'unknown'}. If lang=${lang} is missing, install tesseract-ocr-${lang}.`);
+  }
+  const text = (r.stdout || '').replace(/\f$/, '').trimEnd();
+  return textResult({
+    path: meta.path,
+    size_bytes: meta.size_bytes,
+    active_window: meta.active_window,
+    tool: meta.tool,
+    lang,
+    text,
+    text_length: text.length,
+  });
+}
+
 // ─── Tool registry ────────────────────────────────────────────────────────
 const TOOLS = [
   {
@@ -500,6 +535,19 @@ const TOOLS = [
       required: ['command'],
     },
   },
+  {
+    name: 'screenshot_text',
+    description: 'Take a screenshot and OCR it with tesseract. Returns the recognized text plus the path to the underlying PNG. Use when Claude needs to READ what is on screen (log windows, error dialogs, terminal output in non-focused windows) rather than just see the image. Requires tesseract-ocr installed.',
+    annotations: { title: 'Read text from screen (OCR)', readOnlyHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        active_window: { type: 'boolean', description: 'If true, capture only the currently-focused window. Default false (full screen).' },
+        path: { type: 'string', description: 'Optional target path for the PNG. Defaults to /tmp/claude-linux-mcp/shots/shot-<ts>.png.' },
+        lang: { type: 'string', description: 'Tesseract language code (e.g. "eng", "fra", "deu", "nld", or "eng+fra" for multi). Default "eng". Requires the matching tesseract-ocr-<lang> package.' },
+      },
+    },
+  },
 ];
 
 const HANDLERS = {
@@ -517,6 +565,7 @@ const HANDLERS = {
   clipboard_get: clipboardGet,
   clipboard_set: clipboardSet,
   launch_app: launchApp,
+  screenshot_text: screenshotText,
 };
 
 // ─── JSON-RPC dispatch ────────────────────────────────────────────────────
@@ -527,7 +576,7 @@ async function handle(msg) {
     respond(id, {
       protocolVersion: '2024-11-05',
       capabilities: { tools: {} },
-      serverInfo: { name: 'linux-desktop-mcp', version: '0.1.3' },
+      serverInfo: { name: 'linux-desktop-mcp', version: '0.2.0' },
     });
     return;
   }
