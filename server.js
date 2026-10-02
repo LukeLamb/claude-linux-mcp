@@ -745,9 +745,9 @@ async function desktopInfo() {
       uinput_access: [
         'sudo groupadd -f uinput',
         'sudo usermod -aG uinput "$USER"',
-        `echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/60-uinput.rules`,
+        `echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/99-uinput.rules`,
         'sudo udevadm control --reload-rules && sudo udevadm trigger',
-        'log out and back in so the new group applies',
+        'reboot so the new group applies (logging out is not always enough: the systemd user session that starts ydotoold can outlive it)',
       ],
       ydotoold: 'ydotool >= 1.0 only: systemctl --user enable --now ydotool',
       pointer_accuracy: "gsettings set org.gnome.desktop.peripherals.mouse accel-profile 'flat'  (absolute mouse moves are only exact without acceleration)",

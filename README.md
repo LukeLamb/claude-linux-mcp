@@ -104,16 +104,16 @@ Run the `desktop_info` tool at any point; it reports what's missing and prints t
    sudo apt install ydotool wl-clipboard gnome-screenshot
    ```
 
-2. **Let your user drive `/dev/uinput`** (a dedicated group, rather than `input`, which could also read every keyboard):
+2. **Let your user drive `/dev/uinput`** (a dedicated group, rather than `input`, which could also read every keyboard). The rule is numbered `99-` so it runs after the one Debian's ydotool package installs:
 
    ```bash
    sudo groupadd -f uinput
    sudo usermod -aG uinput "$USER"
-   echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/60-uinput.rules
+   echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/99-uinput.rules
    sudo udevadm control --reload-rules && sudo udevadm trigger
    ```
 
-   Log out and back in so the group applies.
+   **Reboot** so the group applies. Logging out isn't always enough: the systemd user session that starts terminals and `ydotoold` can outlive it. Afterwards `id | grep uinput` should match and `ls -l /dev/uinput` should show group `uinput`.
 
 3. **ydotool 1.0 or newer only: start the daemon.** Check with `ydotool` (no arguments). If its command list has no `recorder` entry, you have 1.x:
 
