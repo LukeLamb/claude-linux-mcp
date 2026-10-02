@@ -1,6 +1,6 @@
 # Linux Desktop — Claude Desktop extension
 
-A [Claude Desktop](https://claude.ai/download) extension that gives Claude full desktop control on Linux/X11: screenshot, mouse, keyboard, window management, clipboard, and app launch.
+A [Claude Desktop](https://claude.ai/download) extension that gives Claude full desktop control on Linux (X11 and Wayland): screenshot, mouse, keyboard, window management, clipboard, and app launch.
 
 Fills the same niche as [Windows-MCP](https://github.com/CursorTouch/Windows-MCP) but for Linux. Built to pair with [claude-terminal-mcp](https://github.com/LukeLamb/claude-terminal-mcp) — Terminal handles the shell; this handles the GUI.
 
@@ -24,7 +24,7 @@ The denylist-style protection used by [claude-terminal-mcp](https://github.com/L
 
 ## What it does
 
-Fourteen tools:
+Sixteen tools:
 
 | Tool | Purpose |
 |---|---|
@@ -37,27 +37,29 @@ Fourteen tools:
 | `mouse_click(button?, x?, y?)` | Click left/middle/right; optional coords. |
 | `mouse_drag(x1, y1, x2, y2, button?)` | Drag from → to. |
 | `mouse_scroll(direction, amount?)` | Scroll up/down/left/right by N clicks. |
-| `type_text(text, delay?)` | Type a string into the focused window. |
+| `type_text(text, delay?, method?)` | Type a string into the focused window. On Wayland, `method` picks keystrokes or a clipboard paste (see below). |
 | `key_press(combo)` | Press a combo like `ctrl+c`, `alt+Tab`, `super`, `Return`. |
 | `clipboard_get()` | Read the CLIPBOARD selection as text. |
 | `clipboard_set(text)` | Write a string to the CLIPBOARD. |
 | `launch_app(command)` | Spawn an application detached (e.g. `firefox`, `gnome-terminal`, `code /path`). |
+| `screenshot_text(active_window?, path?, lang?)` | Screenshot + OCR with tesseract; returns the recognized text. |
+| `desktop_info()` | Shows the active backend (X11/Wayland), keyboard layout, what's installed, what's missing, and the exact setup commands. |
 
-All shell out to small, well-known X11 CLI tools — no npm dependencies.
+All shell out to small, well-known CLI tools — no npm dependencies. The backend is picked automatically from `$XDG_SESSION_TYPE` / `$WAYLAND_DISPLAY`; set `CLAUDE_LINUX_MCP_BACKEND=x11` or `wayland` to override.
 
 ---
 
 ## Requirements
 
-**Display server:** X11. Wayland is **not** supported in v0.1 because Wayland's security model deliberately blocks cross-process input injection. To check which session you're on:
+**Display server:** X11 or Wayland. To check which session you're on:
 
 ```bash
 echo $XDG_SESSION_TYPE
 ```
 
-If it says `wayland`, log out and pick "Ubuntu on Xorg" (or your distro's equivalent) at the login screen.
+If it says `wayland`, follow [Wayland setup](#wayland-setup) below instead of this section.
 
-**System tools (one-time install):**
+**System tools for X11 (one-time install):**
 
 ```bash
 sudo apt install xdotool wmctrl xclip
@@ -79,9 +81,68 @@ sudo apt install tesseract-ocr tesseract-ocr-eng
 # Add tesseract-ocr-<lang> for other languages (fra, deu, nld, …).
 ```
 
-If tesseract isn't installed, only `screenshot_text` is unavailable — the other 14 tools work normally.
+If tesseract isn't installed, only `screenshot_text` is unavailable — the other tools work normally.
 
 **Claude Desktop:** ≥ 0.10.0 on Linux (bundles a recent Node; no system Node required).
+
+### Wayland setup
+
+Wayland doesn't let one program read or drive another's windows, so each job uses a different tool:
+
+| Job | Tool |
+|---|---|
+| Mouse and keyboard | `ydotool` (injects input through `/dev/uinput`) |
+| Clipboard | `wl-clipboard` (`xclip` is used as a fallback) |
+| Screenshots | `gnome-screenshot` on GNOME, `grim` on Sway/Hyprland |
+| Window list/focus/move/close | the bundled GNOME Shell helper extension (without it, only XWayland windows are visible via `wmctrl`) |
+
+Run the `desktop_info` tool at any point; it reports what's missing and prints these commands with the right paths filled in.
+
+1. **Packages:**
+
+   ```bash
+   sudo apt install ydotool wl-clipboard gnome-screenshot
+   ```
+
+2. **Let your user drive `/dev/uinput`** (a dedicated group, rather than `input`, which could also read every keyboard):
+
+   ```bash
+   sudo groupadd -f uinput
+   sudo usermod -aG uinput "$USER"
+   echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/60-uinput.rules
+   sudo udevadm control --reload-rules && sudo udevadm trigger
+   ```
+
+   Log out and back in so the group applies.
+
+3. **ydotool 1.0 or newer only: start the daemon.** Check with `ydotool` (no arguments). If its command list has no `recorder` entry, you have 1.x:
+
+   ```bash
+   systemctl --user enable --now ydotool
+   ```
+
+   ydotool 0.1.x (what Ubuntu 24.04 packages) needs no daemon, but it can't drag or scroll.
+
+4. **Make absolute mouse moves exact.** ydotool positions the pointer by moving it relatively from the top-left corner, so pointer acceleration throws it off:
+
+   ```bash
+   gsettings set org.gnome.desktop.peripherals.mouse accel-profile 'flat'
+   ```
+
+5. **GNOME helper extension** (for `list_windows`, `focus_window`, `move_window`, `close_window`). It ships inside the `.mcpb` and in [`gnome-extension/`](gnome-extension/):
+
+   ```bash
+   mkdir -p ~/.local/share/gnome-shell/extensions
+   cp -r gnome-extension/claude-linux-mcp@lukelamb.github.io ~/.local/share/gnome-shell/extensions/
+   # log out and back in (GNOME on Wayland only loads new extensions at login)
+   gnome-extensions enable claude-linux-mcp@lukelamb.github.io
+   ```
+
+   It only exposes a small D-Bus interface (`io.github.lukelamb.ClaudeLinuxMcp` on the session bus) and does nothing on its own.
+
+**Keyboard layouts.** ydotool sends physical keys and types with a US keymap. `key_press` remaps letters for AZERTY (`fr`, `be`) and QWERTZ (`de`, `ch`, …) layouts, read from GNOME's input-source settings (override with `CLAUDE_LINUX_MCP_KB_LAYOUT=be`). On non-US layouts `type_text` defaults to pasting through the clipboard (it presses `ctrl+v`, then restores your previous clipboard); pass `method: "type"` to force keystrokes. In terminals, paste with `key_press("ctrl+shift+v")` after `clipboard_set` instead.
+
+**HiDPI.** With display scaling, screenshot pixels and pointer coordinates can differ by the scale factor.
 
 ---
 
@@ -93,7 +154,7 @@ If tesseract isn't installed, only `screenshot_text` is unavailable — the othe
 4. Back on **All extensions**, make sure **Linux Desktop** is toggled on.
 5. In a chat, open the connector/tools picker and enable **Linux Desktop** for that conversation.
 
-On first tool call, the server detects missing X11 utilities and returns a clear "install with: `sudo apt install …`" error — you don't have to read the full README to discover what's missing.
+On first tool call, the server detects missing utilities and returns a clear "install with: `sudo apt install …`" error — you don't have to read the full README to discover what's missing.
 
 ---
 
@@ -111,11 +172,10 @@ Try asking Claude:
 
 ---
 
-## Known limitations (v0.1)
+## Known limitations
 
-- **X11 only.** Wayland requires a totally different approach (`ydotool` + privileged daemon, portal APIs for screenshots). Adding Wayland support is on the roadmap but nontrivial.
+- **Wayland needs one-time setup** (see [Wayland setup](#wayland-setup)), and window management there needs GNOME plus the helper extension. On other Wayland compositors only XWayland windows can be listed or moved.
 - **No AT-SPI UI inspection.** v0.1 works with coordinates + window titles. Semantic ("click the Send button") targeting requires AT-SPI inspection, which is messy on Electron/Chromium apps and deserves its own focused v0.2.
-- **No OCR.** Screenshots are PNGs; Claude reads them with its vision. That works well for most use cases but has no built-in "find the word 'Cancel' on screen and click it" primitive.
 - **Yellow "Tool result could not be submitted" banner.** Cosmetic; fires on dynamic-tool-loading steps. Affects the stock Filesystem extension too. Not this extension's bug.
 
 ---
@@ -126,7 +186,7 @@ Try asking Claude:
 
 - **Data collection:** None. The extension does not phone home, emit telemetry, or make any network requests of its own.
 - **Data usage & storage:** Screenshots are saved to `/tmp/claude-linux-mcp/shots/` so Claude can reference them later in the same conversation. Nothing else is persisted by the extension itself.
-- **Clipboard:** `clipboard_get()` reads whatever is currently on your X11 CLIPBOARD selection and passes it back to Claude Desktop in the tool result. Treat this the same way you'd treat pasting into a chat — don't ask for it if sensitive data is on your clipboard.
+- **Clipboard:** `clipboard_get()` reads whatever is currently on your clipboard and passes it back to Claude Desktop in the tool result. Treat this the same way you'd treat pasting into a chat — don't ask for it if sensitive data is on your clipboard.
 - **Third-party sharing:** None. Nothing is transmitted to Anthropic, the extension author, or any third party by this extension. (Claude Desktop itself separately sends tool inputs/outputs to Anthropic as part of the normal chat flow — that's Anthropic's relationship with you, not this extension's.)
 - **Retention:** `/tmp/claude-linux-mcp/` is cleared at every reboot. To clear manually: `rm -rf /tmp/claude-linux-mcp`.
 - **Permissions scope:** All tools run with your own user's permissions — the same as anything you'd type into a terminal or do with a mouse.
