@@ -569,14 +569,20 @@ const HANDLERS = {
 };
 
 // ─── JSON-RPC dispatch ────────────────────────────────────────────────────
+// Newest first. Echo the client's requested version when we support it,
+// otherwise offer our latest and let the client decide.
+const SUPPORTED_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
+
 async function handle(msg) {
   const { id, method, params } = msg;
 
   if (method === 'initialize') {
     respond(id, {
-      protocolVersion: '2024-11-05',
+      protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(msg.params && msg.params.protocolVersion)
+        ? msg.params.protocolVersion
+        : SUPPORTED_PROTOCOL_VERSIONS[0],
       capabilities: { tools: {} },
-      serverInfo: { name: 'linux-desktop-mcp', version: '0.2.0' },
+      serverInfo: { name: 'linux-desktop-mcp', version: '0.2.1' },
     });
     return;
   }
