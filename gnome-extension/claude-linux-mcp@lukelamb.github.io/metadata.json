@@ -1,0 +1,8 @@
+{
+  "uuid": "claude-linux-mcp@lukelamb.github.io",
+  "name": "Claude Linux MCP helper",
+  "description": "Lets the Claude Linux Desktop MCP extension list, focus, move and close windows on Wayland, which GNOME does not allow outside programs to do. Exposes a small D-Bus interface on the session bus; it does nothing on its own.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/LukeLamb/claude-linux-mcp",
+  "version-name": "1.0"
+}

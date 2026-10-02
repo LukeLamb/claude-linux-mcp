@@ -1,6 +1,6 @@
 {
   "name": "claude-linux-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "MCP server giving Claude full desktop control on Linux/X11: screenshot, mouse, keyboard, windows, clipboard, app launch.",
   "main": "server.js",
   "license": "MIT",
